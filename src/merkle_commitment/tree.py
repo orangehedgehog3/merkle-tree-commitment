@@ -1,11 +1,11 @@
 """把一组消息做成承诺，再用开封信息重算并核对承诺。"""
 
 from secrets import token_bytes
-from typing import Iterable, Tuple, Union
+from typing import Iterable, Sequence, Tuple, Union
 
 from .sha3 import sha3_256_digest as H
 from .protocol import (
-    Commitment, FullOpening, MerkleProof, Message, NONCE_BYTES,
+    Commitment, FullOpening, MerkleProof, MultiProof, Message, NONCE_BYTES,
     encode_u64, message_bytes, tree_depth, validate_leaf_count, validate_u64,
 )
 
@@ -85,6 +85,35 @@ class MerkleTree:
         proof = self.prove(index)
         return self._messages[index], proof
 
+    def prove_many(self, indices: Iterable[int]) -> MultiProof:
+        """生成共享路径已合并的多位置证明，输入位置不可重复。"""
+        selected = tuple(indices)
+        if not selected:
+            raise ValueError('at least one index is required')
+        for index in selected:
+            validate_u64(index)
+            if index >= len(self._messages):
+                raise ValueError('index outside committed vector')
+        if len(set(selected)) != len(selected):
+            raise ValueError('indices must be unique')
+        selected = tuple(sorted(selected))
+        positions = selected
+        siblings = []
+        for row in self._levels[:-1]:
+            active = set(positions)
+            for position in positions:
+                sibling = position ^ 1
+                if sibling not in active:
+                    siblings.append(row[sibling])
+            positions = tuple(sorted({position // 2 for position in positions}))
+        return MultiProof(selected, tuple(self._nonces[index] for index in selected),
+                          tuple(siblings))
+
+    def open_many(self, indices: Iterable[int]) -> Tuple[Tuple[bytes, ...], MultiProof]:
+        """返回按证明索引顺序排列的消息和合并证明。"""
+        proof = self.prove_many(indices)
+        return tuple(self._messages[index] for index in proof.indices), proof
+
     def open_all(self) -> FullOpening:
         """交出全部消息和随机值，供验证者重建整棵树。"""
         return FullOpening(self._messages, self._nonces)
@@ -130,6 +159,57 @@ def verify(
             position //= 2
         return _root_hash(commitment.leaf_count, current) == commitment.root
     except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def verify_many(
+    commitment: Union[Commitment, bytes],
+    messages: Sequence[Message],
+    proof: Union[MultiProof, bytes],
+) -> bool:
+    """验证多个位置；消息顺序必须与 proof.indices 一致。"""
+    try:
+        if type(commitment) is bytes:
+            commitment = Commitment.from_bytes(commitment)
+        if type(proof) is bytes:
+            proof = MultiProof.from_bytes(proof)
+        if type(commitment) is not Commitment or type(proof) is not MultiProof:
+            return False
+        if isinstance(messages, (str, bytes)):
+            return False
+        values = tuple(message_bytes(value) for value in messages)
+        if len(values) != len(proof.indices):
+            return False
+        if any(index >= commitment.leaf_count for index in proof.indices):
+            return False
+
+        active = {
+            index: _leaf_hash(commitment.leaf_count, index, value, nonce)
+            for index, value, nonce in zip(proof.indices, values, proof.nonces)
+        }
+        sibling_index = 0
+        for _ in range(tree_depth(commitment.leaf_count)):
+            parents = {}
+            for position in sorted(active):
+                parent = position // 2
+                if parent in parents:
+                    continue
+                left_position = parent * 2
+                right_position = left_position + 1
+                left = active.get(left_position)
+                right = active.get(right_position)
+                if left is None:
+                    left = proof.siblings[sibling_index]
+                    sibling_index += 1
+                if right is None:
+                    right = proof.siblings[sibling_index]
+                    sibling_index += 1
+                parents[parent] = _parent_hash(left, right)
+            active = parents
+        if sibling_index != len(proof.siblings) or set(active) != {0}:
+            return False
+        return _root_hash(commitment.leaf_count, active[0]) == commitment.root
+    except (IndexError, TypeError, ValueError, OverflowError):
         return False
 
 

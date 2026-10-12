@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import platform
+import random
 import statistics
 import subprocess
 import sys
@@ -56,6 +57,21 @@ def count_hash_calls(values):
 
     with patch.object(m, 'H', counted):
         m.commit(values)
+    return calls
+
+
+def count_verification_hashes(operation):
+    """计数一次验证操作的哈希调用，不混入计时样本。"""
+    original, calls = m.H, 0
+
+    def counted(data):
+        nonlocal calls
+        calls += 1
+        return original(data)
+
+    with patch.object(m, 'H', counted):
+        if not operation():
+            raise RuntimeError('verification fixture failed')
     return calls
 
 
@@ -113,6 +129,43 @@ def benchmark(repetitions):
         values = [b'x' * length] * 32
         output['message_length'].append({'leaf_count': 32, 'message_bytes': length,
             'build': measured(lambda: m.commit(values), repetitions)})
+
+    leaf_count, opening_count = 1024, 64
+    values = [index.to_bytes(8, 'big') + b'x' * 24 for index in range(leaf_count)]
+    public, state = m.commit(values)
+    distributions = {
+        '相邻': tuple(range(480, 480 + opening_count)),
+        '随机': tuple(sorted(random.Random(2026).sample(range(leaf_count), opening_count))),
+        '分散': tuple(index * leaf_count // opening_count for index in range(opening_count)),
+    }
+    output['multiproof'] = []
+    for label, indices in distributions.items():
+        messages, proof = state.open_many(indices)
+        individual = tuple(state.prove(index) for index in indices)
+        if not m.verify_many(public, messages, proof):
+            raise RuntimeError('multiproof fixture failed verification')
+        individual_pairs = tuple(zip(indices, messages, individual))
+        individual_hashes = count_verification_hashes(
+            lambda: all(m.verify(public, index, message, item_proof)
+                        for index, message, item_proof in individual_pairs))
+        multiproof_hashes = count_verification_hashes(
+            lambda: m.verify_many(public, messages, proof))
+        individual_verify_time = measured(
+            lambda: all(m.verify(public, index, message, item_proof)
+                        for index, message, item_proof in individual_pairs),
+            repetitions)
+        multiproof_verify_time = measured(
+            lambda: m.verify_many(public, messages, proof), repetitions)
+        output['multiproof'].append({
+            'distribution': label, 'leaf_count': leaf_count,
+            'opening_count': opening_count, 'frontier_hashes': len(proof.siblings),
+            'multiproof_bytes': len(proof.to_bytes()),
+            'individual_proof_bytes': sum(len(item.to_bytes()) for item in individual),
+            'multiproof_verification_hashes': multiproof_hashes,
+            'individual_verification_hashes': individual_hashes,
+            'multiproof_verify': multiproof_verify_time,
+            'individual_verify': individual_verify_time,
+        })
     return output
 
 
@@ -190,6 +243,18 @@ def render_report(data):
         lines.append('| %d | %d | %s |' %
                      (row['leaf_count'], row['message_bytes'], timing(row['build'], 1e3)))
     lines += ['', '本实现的真实叶子哈希输入有 57 B 固定开销。消息为 256 B 或 4096 B 时，需要吸收更多块，因此相同叶子数量也会花更多时间。', '',
+              '## 批量证明分布对比', '',
+              '固定 1024 个叶子、同时开封 64 个位置。证明字节数不包含消息本身；逐项证明大小为 64 个单项证明编码之和。验证哈希次数通过拦截实际哈希函数计数，multiproof 只重算被选叶子和唯一父节点。', '',
+              '验证耗时为一次批量验证与 64 次顺序单项验证的总耗时；每项先预热，再按测量条件重复采样。', '',
+              '| 分布 | frontier 摘要数 | Multiproof B | 逐项证明 B | Multiproof 哈希数 | 逐项哈希数 | Multiproof 验证 ms | 逐项验证总 ms |',
+              '| --- | --- | --- | --- | --- | --- | --- | --- |']
+    for row in data['multiproof']:
+        lines.append('| %s | %d | %d | %d | %d | %d | %s | %s |' %
+            (row['distribution'], row['frontier_hashes'], row['multiproof_bytes'],
+             row['individual_proof_bytes'], row['multiproof_verification_hashes'],
+             row['individual_verification_hashes'], timing(row['multiproof_verify'], 1e3),
+             timing(row['individual_verify'], 1e3)))
+    lines += ['', '相邻位置共享的路径最多，证明通常最短；随机和分散位置的共享较少。具体节省量取决于选中位置在树中的分布。', '',
               '## 原始记录与复现', '',
               '全部样本和环境字段保存在 [results.json](results.json)，当时的执行输出见 [run.log](run.log)。'
               '这些数据用于判断该设备上的纯 Python 实现；微秒级操作还会受计时和系统调度影响。', '']

@@ -1,0 +1,83 @@
+{
+  "environment": {
+    "timestamp": "2026-10-12T17:51:24.108997+08:00",
+    "python": "3.13.15",
+    "platform": "Darwin 25.6.0 arm64",
+    "processor": "Apple M5"
+  },
+  "fixture": {
+    "leaf_count": 1024,
+    "opening_count": 64,
+    "message_bytes": 32,
+    "random_seed": 2026,
+    "multiproof_bytes_exclude_messages": true,
+    "individual_proof_bytes_are_sum_of_single_proofs": true,
+    "hash_counts_are_observed_verification_calls": true
+  },
+  "timing_method": {
+    "repetitions": 5,
+    "warmup_runs": 1,
+    "timer": "time.perf_counter_ns",
+    "operation": "one multiproof verification versus all 64 individual verifications sequentially",
+    "timings_include": "Python verification overhead and message hashing; no proof generation or serialization"
+  },
+  "measurements": [
+    {
+      "distribution": "adjacent",
+      "indices": "480-543",
+      "frontier_hashes": 8,
+      "multiproof_bytes": 2833,
+      "individual_proof_bytes": 23232,
+      "multiproof_verification_hashes": 136,
+      "individual_verification_hashes": 768,
+      "multiproof_verify_seconds": {
+        "samples": [0.028314541, 0.028541333, 0.028371333, 0.028324417, 0.028378],
+        "mean": 0.0283859248,
+        "stdev": 0.00009125005215450518
+      },
+      "individual_verify_seconds": {
+        "samples": [0.161111917, 0.161263666, 0.161039917, 0.161128041, 0.1611865],
+        "mean": 0.1611460082,
+        "stdev": 0.00008399898314682193
+      }
+    },
+    {
+      "distribution": "random",
+      "indices": "sorted sample without replacement, seed 2026",
+      "frontier_hashes": 202,
+      "multiproof_bytes": 9041,
+      "individual_proof_bytes": 23232,
+      "multiproof_verification_hashes": 330,
+      "individual_verification_hashes": 768,
+      "multiproof_verify_seconds": {
+        "samples": [0.069040125, 0.069052084, 0.069319, 0.069020333, 0.068979583],
+        "mean": 0.069082225,
+        "stdev": 0.0001351936484584274
+      },
+      "individual_verify_seconds": {
+        "samples": [0.16105, 0.160995458, 0.161289834, 0.161126875, 0.16109475],
+        "mean": 0.1611113834,
+        "stdev": 0.00011131924414403337
+      }
+    },
+    {
+      "distribution": "dispersed",
+      "indices": "floor(i * 1024 / 64), i=0..63",
+      "frontier_hashes": 256,
+      "multiproof_bytes": 10769,
+      "individual_proof_bytes": 23232,
+      "multiproof_verification_hashes": 384,
+      "individual_verification_hashes": 768,
+      "multiproof_verify_seconds": {
+        "samples": [0.08037125, 0.080423792, 0.080599667, 0.080615667, 0.080863416],
+        "mean": 0.0805747584,
+        "stdev": 0.0001935353228387496
+      },
+      "individual_verify_seconds": {
+        "samples": [0.161080459, 0.161417458, 0.16135075, 0.161542875, 0.161171833],
+        "mean": 0.161312675,
+        "stdev": 0.00018653549416532134
+      }
+    }
+  ]
+}

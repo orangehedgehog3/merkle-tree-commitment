@@ -119,6 +119,65 @@ class MerkleProof:
 
 
 @dataclass(frozen=True)
+class MultiProof:
+    """多个位置的随机值和去重认证节点，索引必须严格递增。"""
+    indices: Tuple[int, ...]
+    nonces: Tuple[bytes, ...]
+    siblings: Tuple[bytes, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.indices) is not tuple or not self.indices:
+            raise ValueError('multiproof requires a non-empty tuple of indices')
+        if type(self.nonces) is not tuple or len(self.nonces) != len(self.indices):
+            raise ValueError('multiproof indices and nonces must have equal lengths')
+        if any(type(index) is not int for index in self.indices):
+            raise ValueError('multiproof indices must be integers')
+        for index in self.indices:
+            validate_u64(index)
+        if tuple(sorted(set(self.indices))) != self.indices:
+            raise ValueError('multiproof indices must be unique and increasing')
+        for nonce in self.nonces:
+            _fixed_bytes(nonce, NONCE_BYTES, 'opening randomness')
+        if type(self.siblings) is not tuple or len(self.siblings) > MAX_PROOF_DEPTH * len(self.indices):
+            raise ValueError('invalid multiproof sibling list')
+        for sibling in self.siblings:
+            _fixed_bytes(sibling, HASH_BYTES, 'digest')
+
+    def to_bytes(self) -> bytes:
+        """编码索引/随机值和去重摘要；消息由调用方另行提供。"""
+        entries = b''.join(encode_u64(index) + nonce
+                           for index, nonce in zip(self.indices, self.nonces))
+        return (bytes([VERSION]) + encode_u64(len(self.indices)) + entries
+                + encode_u64(len(self.siblings)) + b''.join(self.siblings))
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> MultiProof:
+        """解析 multiproof 编码并拒绝截断或尾随数据。"""
+        if type(data) is not bytes or len(data) < VERSION_BYTES + 2 * U64_BYTES or data[0] != VERSION:
+            raise ValueError('invalid multiproof encoding')
+        count = int.from_bytes(data[VERSION_BYTES:INTEGER_END], 'big')
+        entries_end = INTEGER_END + count * (U64_BYTES + NONCE_BYTES)
+        if count == 0 or entries_end + U64_BYTES > len(data):
+            raise ValueError('invalid multiproof entry count')
+        sibling_count = int.from_bytes(data[entries_end:entries_end + U64_BYTES], 'big')
+        siblings_end = entries_end + U64_BYTES + sibling_count * HASH_BYTES
+        if siblings_end != len(data):
+            raise ValueError('invalid multiproof length')
+        indices, nonces = [], []
+        offset = INTEGER_END
+        for _ in range(count):
+            indices.append(int.from_bytes(data[offset:offset + U64_BYTES], 'big'))
+            offset += U64_BYTES
+            nonces.append(data[offset:offset + NONCE_BYTES])
+            offset += NONCE_BYTES
+        siblings_offset = entries_end + U64_BYTES
+        siblings = tuple(data[siblings_offset + i * HASH_BYTES:
+                      siblings_offset + (i + 1) * HASH_BYTES]
+                         for i in range(sibling_count))
+        return cls(tuple(indices), tuple(nonces), siblings)
+
+
+@dataclass(frozen=True)
 class FullOpening:
     """全部消息及各自的随机值，用于重建整棵树。"""
     messages: Tuple[bytes, ...]

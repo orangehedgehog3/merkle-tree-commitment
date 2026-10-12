@@ -12,10 +12,15 @@
 
 - 先读 [方案设计](docs/方案设计.md)：从三个消息的小树理解承诺、认证路径、安全分析和 SHA3。
 - 再读实现：`protocol.py` 定义字段和编码，`tree.py` 实现建树与开封，`sha3.py` 实现哈希。
-- 对照 `tests/` 中的独立递归规格、固定编码样例和官方哈希答案，核对实现是否符合定义。
+- 对照 `tests/` 中的独立递归规格、multiproof 分布测试和官方哈希答案，核对实现是否符合定义。
 - 最后读 [性能报告](results/性能与验证结果.md)，了解实测结果和计时范围；[作业要求](docs/作业要求.md) 保留课程原文。
 
-`commit(messages)` 返回公开承诺和承诺方的树状态；`state.open(index)` 返回消息与证明；`verify()` 使用验证者此前保存的承诺检查消息和位置。完整开封使用 `state.open_all()` 与 `verify_all()`。协议细节和安全假设集中在方案设计中。
+`commit(messages)` 返回公开承诺和承诺方的树状态；`state.open(index)` 返回单条消息与证明；`verify()` 检查该位置。需要开封多个位置时，`state.open_many(indices)` 返回按升序排列的消息和合并证明，`verify_many()` 只重算共享路径上的唯一父节点。完整开封使用 `state.open_all()` 与 `verify_all()`。协议细节和安全假设集中在方案设计中。
+
+```python
+messages, proof = state.open_many([1, 4, 5])
+valid = verify_many(public, messages, proof)
+```
 
 ## 测试与实验
 
@@ -36,7 +41,7 @@
 | src/merkle_commitment/protocol.py | 承诺与开封的数据类型、字段校验及编解码 |
 | src/merkle_commitment/tree.py | 建树、开封和验证 |
 | src/merkle_commitment/sha3.py | SHA3-256 算法 |
-| tests/ | 协议回归、独立规格、140 条 NIST 向量及 v1 编码样例 |
+| tests/ | 承诺流程回归、multiproof 分布正确性、独立规格及 140 条 NIST 向量 |
 | examples/ | 基础演示和猜测实验 |
 | benchmarks/ | 性能采样与报告生成 |
 | docs/ | 方案设计、示意图和作业要求 |
